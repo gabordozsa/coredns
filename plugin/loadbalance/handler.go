@@ -3,21 +3,54 @@ package loadbalance
 
 import (
 	"context"
+	"crypto/md5"
+	"math/rand"
+	"net"
+	"sync"
+	"time"
 
 	"github.com/coredns/coredns/plugin"
 
 	"github.com/miekg/dns"
 )
 
-// RoundRobin is a plugin to rewrite responses for "load balancing".
-type RoundRobin struct {
-	Next plugin.Handler
-}
+type (
+	// RoundRobin is a plugin to rewrite responses for "load balancing".
+	RoundRobin struct {
+		Next    plugin.Handler
+		policy  string
+		weights *weightedRR
+	}
+	// "weighted-round-robin" policy specific data
+	weightedRR struct {
+		fileName string
+		reload   time.Duration
+		md5sum   [md5.Size]byte
+		domains  map[string]*domain
+		isRandom bool
+		rn       *rand.Rand
+		mutex    sync.Mutex
+	}
+	// Per domain weights and the expected top entry in the result list
+	domain struct {
+		weights []*weightItem
+		topIP
+	}
+	// Weight assigned to an address
+	weightItem struct {
+		address net.IP
+		value   uint8
+	}
+	// Get the expected top IP for the next answer
+	topIP interface {
+		nextTopIP(weights []*weightItem, rn *rand.Rand) net.IP
+	}
+)
 
 // ServeDNS implements the plugin.Handler interface.
 func (rr RoundRobin) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
-	wrr := &RoundRobinResponseWriter{w}
-	return plugin.NextOrFailure(rr.Name(), rr.Next, ctx, wrr, r)
+	rrw := &RoundRobinResponseWriter{ResponseWriter: w, policy: rr.policy, weights: rr.weights}
+	return plugin.NextOrFailure(rr.Name(), rr.Next, ctx, rrw, r)
 }
 
 // Name implements the Handler interface.

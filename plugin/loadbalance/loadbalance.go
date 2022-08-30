@@ -5,8 +5,17 @@ import (
 	"github.com/miekg/dns"
 )
 
+const (
+	ramdomShufflePolicy      = "round_robin"
+	weightedRoundRobinPolicy = "weighted_round_robin"
+)
+
 // RoundRobinResponseWriter is a response writer that shuffles A, AAAA and MX records.
-type RoundRobinResponseWriter struct{ dns.ResponseWriter }
+type RoundRobinResponseWriter struct {
+	dns.ResponseWriter
+	policy  string
+	weights *weightedRR
+}
 
 // WriteMsg implements the dns.ResponseWriter interface.
 func (r *RoundRobinResponseWriter) WriteMsg(res *dns.Msg) error {
@@ -18,9 +27,14 @@ func (r *RoundRobinResponseWriter) WriteMsg(res *dns.Msg) error {
 		return r.ResponseWriter.WriteMsg(res)
 	}
 
-	res.Answer = roundRobin(res.Answer)
-	res.Ns = roundRobin(res.Ns)
-	res.Extra = roundRobin(res.Extra)
+	switch r.policy {
+	case ramdomShufflePolicy:
+		res.Answer = roundRobin(res.Answer)
+		res.Ns = roundRobin(res.Ns)
+		res.Extra = roundRobin(res.Extra)
+	case weightedRoundRobinPolicy:
+		res.Answer = r.weights.weightedRoundRobin(res.Question[0].Name, res.Answer)
+	}
 
 	return r.ResponseWriter.WriteMsg(res)
 }
