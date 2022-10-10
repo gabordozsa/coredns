@@ -11,8 +11,8 @@ import (
 	"github.com/miekg/dns"
 )
 
-func TestLoadBalance(t *testing.T) {
-	rm := RoundRobin{Next: handler()}
+func TestLoadBalanceRandom(t *testing.T) {
+	rm := RoundRobin{Next: handler(), policy: ramdomShufflePolicy}
 
 	// the first X records must be cnames after this test
 	tests := []struct {
