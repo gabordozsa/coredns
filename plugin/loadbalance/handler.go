@@ -34,7 +34,8 @@ type (
 	// Per domain weights and the expected top entry in the result list
 	domain struct {
 		weights []*weightItem
-		topIP
+		topIP   net.IP
+		topIPupdater
 	}
 	// Weight assigned to an address
 	weightItem struct {
@@ -42,8 +43,8 @@ type (
 		value   uint8
 	}
 	// Get the expected top IP for the next answer
-	topIP interface {
-		nextTopIP(weights []*weightItem, rn *rand.Rand) net.IP
+	topIPupdater interface {
+		nextTopIP(curd *domain, rn *rand.Rand)
 	}
 )
 
