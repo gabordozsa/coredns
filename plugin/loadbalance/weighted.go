@@ -186,6 +186,7 @@ func (w *weightedRR) updateWeights() error {
 		// initialize first expected "top" IP
 		d.nextTopIP(d, w.rn)
 	}
+	log.Infof("Successfully reloaded weight file %s", w.fileName)
 	return nil
 }
 

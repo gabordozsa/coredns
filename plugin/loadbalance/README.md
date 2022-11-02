@@ -23,9 +23,9 @@ loadbalance [POLICY]
 
 The "round_robin" strategy randomizes the order of  A, AAAA, and MX records applying a uniform probability distribution.
 
-The "weighted_round_robin" policy assigns weight values to IPs to control the relative likelihood of particular IPs to be returned as top
-entry (A or AAAA record) in the answer. See [Wikipedia](https://en.wikipedia.org/wiki/Weighted_round_robin) about a generic
-description of weighted round robin load balancing strategy.
+The "weighted_round_robin" policy assigns weight values to IPs to control the relative likelihood of particular IPs to be returned as the first
+(top) A/AAAA record in the answer. Note that it does not shuffle all the records in the answer, it is only concerned about the first A/AAAA record
+returned in the answer.
 
 Additional option required by "weighted_round_robin" policy:
 
@@ -35,9 +35,27 @@ loadbalance weighted_round_robin WEIGHTFILE
 
 * **WEIGHTFILE** the weight file containing the weight values assigned to IPs. If the path is relative, the path from the **root** plugin will be prepended to it.
 
-The weight file is parsed line-by-line. If the first character in the line is '#' then the line is ignored (i.e. comment line). Otherwise, if the line contains a single word then it is a domain name. If the line contains two words then the first one is an IP and the second one is a weight value for that IP. The IPs are addresses for the domain name which is defined above them in the file. Multiple domain names can be specified in the same weight file. A weight value must be in the range [1,255].
+Expected weight file syntax:
 
-If the server receives a query for which no domain name is specified in the corresponding weight file then the answer is returned unmodified. If the domain name is specified in the weight file but the answer does not include the expected top IP (or there isn't any IP/weight pair specified for the particular domain name) then the answer is returned unmodified.
+~~~
+# Comment lines are ignored
+
+domain-name1
+ip11 weight11
+ip12 weight12
+ip13 weight13
+
+domain-name2
+ip21 weight21
+ip22 weight22
+# ... etc.
+~~~
+
+where *ipXY* is an IP address for *domain-nameX* and *weightXY* is the weight value associated with that IP. The weight values are in the range of [1,255].
+
+For each new result list, the weighted-round-robin policy determines the "next expected top IP" from the weighted IPs list (defined in the weight file). Afterwards, it tries to move that particular IP to the first (top) position of the result list.
+
+If the server receives a query for which no domain name is specified in the corresponding weight file then the answer is returned unmodified. If the domain name is specified in the weight file but the answer does not include the expected top IP (or there isn't any IP/weight pair specified for the particular domain name) then the answer is returned unmodified, too.
 
 More (optional) control for the "weighted_round_robin" policy:
 
