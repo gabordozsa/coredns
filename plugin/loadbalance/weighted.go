@@ -18,50 +18,6 @@ import (
 	"github.com/miekg/dns"
 )
 
-type (
-	// Determinstic weighted-round-robin
-	determininsticWRR struct {
-		index int
-		count uint8
-	}
-	// Randomized weighted-round-robin
-	randomizedWRR struct {
-		wsum uint
-	}
-)
-
-func (dw *determininsticWRR) nextTopIP(curd *domain, rn *rand.Rand) {
-	topIndex := dw.index
-	curd.topIP = curd.weights[topIndex].address
-
-	// update expected top IP count
-	dw.count += 1
-	if dw.count == curd.weights[topIndex].value {
-		// Move to the next expected top entry
-		if dw.index+1 < len(curd.weights) {
-			dw.index += 1
-		} else {
-			// restart the weight list
-			dw.index = 0
-		}
-		dw.count = 0
-	}
-}
-
-func (rw *randomizedWRR) nextTopIP(curd *domain, rn *rand.Rand) {
-	v := rn.Intn(int(rw.wsum))
-
-	psum := 0
-	var w *weightItem
-	for _, w = range curd.weights {
-		psum += int(w.value)
-		if v < psum {
-			break
-		}
-	}
-	curd.topIP = w.address
-}
-
 func (w *weightedRR) weightedRoundRobin(qname string, in []dns.RR) []dns.RR {
 	cname := []dns.RR{}
 	address := []dns.RR{}
@@ -132,9 +88,24 @@ L:
 		address[0], address[itop] = address[itop], address[0]
 	}
 	// move to the next expected "top" IP
-	curd.nextTopIP(curd, w.rn)
+	curd.nextTopIP(w.rn)
 
 	return true
+}
+
+// Compute the next expected top (first) IP
+func (d *domain) nextTopIP(rn *rand.Rand) {
+	v := rn.Intn(int(d.wsum))
+
+	psum := 0
+	var w *weightItem
+	for _, w = range d.weights {
+		psum += int(w.value)
+		if v < psum {
+			break
+		}
+	}
+	d.topIP = w.address
 }
 
 // Start go routine to update weights from the weight file periodically
@@ -176,15 +147,12 @@ func (w *weightedRR) updateWeights() error {
 		sort.Slice(d.weights, func(i, j int) bool {
 			return d.weights[i].value > d.weights[j].value
 		})
-		// Calculate the sum of weights per domain for the ramdomized version
-		if w.isRandom {
-			dd := d.topIPupdater.(*randomizedWRR)
-			for _, w := range d.weights {
-				dd.wsum += uint(w.value)
-			}
+		// Calculate the sum of weights per domain
+		for _, w := range d.weights {
+			d.wsum += uint(w.value)
 		}
 		// initialize first expected "top" IP
-		d.nextTopIP(d, w.rn)
+		d.nextTopIP(w.rn)
 	}
 	log.Infof("Successfully reloaded weight file %s", w.fileName)
 	return nil
@@ -249,11 +217,6 @@ func (w *weightedRR) parseWeights(scanner *bufio.Scanner) error {
 			curd, ok = w.domains[dname]
 			if !ok {
 				curd = &domain{}
-				if w.isRandom {
-					curd.topIPupdater = &randomizedWRR{}
-				} else {
-					curd.topIPupdater = &determininsticWRR{}
-				}
 				w.domains[dname] = curd
 			}
 		case 2:
@@ -284,15 +247,9 @@ func (w *weightedRR) parseWeights(scanner *bufio.Scanner) error {
 }
 
 func (w *weightedRR) print() {
-	fmt.Printf("weightedRR --- fname:%s reload:%v isRandom:%v ", w.fileName, w.reload, w.isRandom)
+	fmt.Printf("weightedRR --- fname:%s reload:%v ", w.fileName, w.reload)
 	for k, d := range w.domains {
-		if !w.isRandom {
-			ti := d.topIPupdater.(*determininsticWRR)
-			fmt.Printf("domain:%s topIndex:%v toCount:%v ", k, ti.index, ti.count)
-		} else {
-			ti := d.topIPupdater.(*randomizedWRR)
-			fmt.Printf("domain:%s wsum:%v ", k, ti.wsum)
-		}
+		fmt.Printf("domain:%s wsum:%v ", k, d.wsum)
 		fmt.Printf("weights:[")
 		for _, i := range d.weights {
 			fmt.Printf("%+v, ", *i)

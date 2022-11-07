@@ -27,7 +27,6 @@ type (
 		reload   time.Duration
 		md5sum   [md5.Size]byte
 		domains  map[string]*domain
-		isRandom bool
 		rn       *rand.Rand
 		mutex    sync.Mutex
 	}
@@ -35,16 +34,12 @@ type (
 	domain struct {
 		weights []*weightItem
 		topIP   net.IP
-		topIPupdater
+		wsum    uint
 	}
 	// Weight assigned to an address
 	weightItem struct {
 		address net.IP
 		value   uint8
-	}
-	// Get the expected top IP for the next answer
-	topIPupdater interface {
-		nextTopIP(curd *domain, rn *rand.Rand)
 	}
 )
 

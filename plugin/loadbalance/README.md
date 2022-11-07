@@ -62,14 +62,10 @@ More (optional) control for the "weighted_round_robin" policy:
 ~~~
 loadbalance weighted_round_robin WEIGHTFILE {
 			reload DURATION
-			[deterministic]
 }
 ~~~
 
 * **reload** the interval to reload **WEIGHTFILE** and update weight assignments if there are changes in the file. The default value is **30s**. A value of **0s** means to not scan for changes and reload.
-
-* **deterministic** switch to deterministic weighted-round-robin strategy. This remove randomness from answer re-ordering. A weight value defines exactly how many
-times a particular IP should be in the top record for consecutive queries to the same domain name.
 
 
 ## Examples

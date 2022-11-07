@@ -11,11 +11,10 @@ import (
 var testWeighted = []struct {
 	expectedWeightFile   string
 	expectedWeightReload string
-	expectedIsRandom     bool
 }{
-	{"wfile", "30s", true},
-	{"wf", "10s", true},
-	{"wf", "0s", false},
+	{"wfile", "30s"},
+	{"wf", "10s"},
+	{"wf", "0s"},
 }
 
 func TestSetup(t *testing.T) {
@@ -35,7 +34,6 @@ func TestSetup(t *testing.T) {
                                               } `, false, "weighted_round_robin", "", 1},
 		{`loadbalance weighted_round_robin wf {
                                                 reload 0s
-                                                deterministic
                                               } `, false, "weighted_round_robin", "", 2},
 		// negative
 		{`loadbalance fleeb`, true, "", "unknown policy", -1},
@@ -88,9 +86,6 @@ func TestSetup(t *testing.T) {
 			}
 			if testWeighted[i].expectedWeightReload != w.reload.String() {
 				t.Errorf("Test %d: Expected weight reload duration %s but got %s for input %s", i, testWeighted[i].expectedWeightReload, w.reload, test.input)
-			}
-			if testWeighted[i].expectedIsRandom != w.isRandom {
-				t.Errorf("Test %d: Expected isRandom:%t but got %t for input %s", i, testWeighted[i].expectedIsRandom, w.isRandom, test.input)
 			}
 		}
 	}

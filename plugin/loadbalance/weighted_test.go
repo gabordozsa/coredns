@@ -26,7 +26,7 @@ var testOneDomainWRR = map[string]*domain{
 			&weightItem{net.ParseIP("192.168.1.14"), uint8(20)},
 			&weightItem{net.ParseIP("192.168.1.15"), uint8(10)},
 		},
-		topIPupdater: &randomizedWRR{wsum: uint(30)},
+		wsum: uint(30),
 	},
 }
 
@@ -49,7 +49,7 @@ var testTwoDomainsWRR = map[string]*domain{
 			&weightItem{net.ParseIP("192.168.1.14"), uint8(20)},
 			&weightItem{net.ParseIP("192.168.1.15"), uint8(10)},
 		},
-		topIPupdater: &randomizedWRR{wsum: uint(30)},
+		wsum: uint(30),
 	},
 	"w2.example.org.": &domain{
 		weights: []*weightItem{
@@ -57,7 +57,7 @@ var testTwoDomainsWRR = map[string]*domain{
 			&weightItem{net.ParseIP("192.168.2.15"), uint8(12)},
 			&weightItem{net.ParseIP("192.168.2.16"), uint8(11)},
 		},
-		topIPupdater: &randomizedWRR{wsum: uint(36)},
+		wsum: uint(36),
 	},
 }
 
@@ -109,7 +109,7 @@ func TestWeightFileUpdate(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer rm()
-		weighted := &weightedRR{fileName: testFile, isRandom: true, rn: rand.New(rand.NewSource(1))}
+		weighted := &weightedRR{fileName: testFile, rn: rand.New(rand.NewSource(1))}
 		err = weighted.updateWeights()
 		if test.shouldErr && err == nil {
 			t.Errorf("Test %d: Expected error but found %s", i, err)
@@ -158,14 +158,10 @@ func checkDomainsWRR(t *testing.T, testIndex int, expectedDomains, domains map[s
 						ret = retError
 					}
 				}
-				expectedTopIP, ok1 := expectedDomain.topIPupdater.(*randomizedWRR)
-				topIP, ok2 := domain.topIPupdater.(*randomizedWRR)
-				if !ok2 {
-					t.Errorf("Test %d: Expected randomized WRR for domain %s", testIndex, dname)
-					ret = retError
-				} else if ok1 && expectedTopIP.wsum != topIP.wsum {
+				expectedWsum := expectedDomain.wsum
+				if expectedWsum != domain.wsum {
 					t.Errorf("Test %d: Expected weight sum %d but got %d for domain %s", testIndex,
-						expectedTopIP.wsum, topIP.wsum, dname)
+						expectedWsum, domain.wsum, dname)
 					ret = retError
 				}
 			}
@@ -188,7 +184,7 @@ func TestPeriodicWeightUpdate(t *testing.T) {
 	defer rm()
 
 	// configure weightedRR with "oneDomainWRR" weight file content
-	weighted := &weightedRR{fileName: testFile1, isRandom: true, rn: rand.New(rand.NewSource(1))}
+	weighted := &weightedRR{fileName: testFile1, rn: rand.New(rand.NewSource(1))}
 
 	err = weighted.updateWeights()
 	if err != nil {
@@ -219,9 +215,8 @@ func TestPeriodicWeightUpdate(t *testing.T) {
 }
 
 func TestLoadBalanceWRR(t *testing.T) {
-	weighted := &weightedRR{}
+	weighted := &weightedRR{rn: rand.New(rand.NewSource(1))}
 
-	// We test randomWRR in determinstic mode
 	rm := RoundRobin{Next: handler(), policy: weightedRoundRobinPolicy, weights: weighted}
 
 	type testQuery struct {
@@ -237,6 +232,7 @@ func TestLoadBalanceWRR(t *testing.T) {
 				&weightItem{net.ParseIP("10.240.0.2"), uint8(2)},
 				&weightItem{net.ParseIP("10.240.0.1"), uint8(1)},
 			},
+			wsum: uint(3),
 		},
 	}
 	twoDomains := map[string]*domain{
@@ -245,12 +241,14 @@ func TestLoadBalanceWRR(t *testing.T) {
 				&weightItem{net.ParseIP("10.240.0.2"), uint8(2)},
 				&weightItem{net.ParseIP("10.240.0.1"), uint8(1)},
 			},
+			wsum: uint(3),
 		},
 		"endpoint.region1.skydns.test": &domain{
 			weights: []*weightItem{
 				&weightItem{net.ParseIP("::2"), uint8(3)},
 				&weightItem{net.ParseIP("::1"), uint8(2)},
 			},
+			wsum: uint(5),
 		},
 	}
 
@@ -360,8 +358,7 @@ func TestLoadBalanceWRR(t *testing.T) {
 		// set domain map for weighted round robin
 		rm.weights.domains = test.domains
 		for _, d := range rm.weights.domains {
-			d.topIPupdater = &determininsticWRR{} // deterministic mode for testing
-			d.topIPupdater.nextTopIP(d, nil)      // initialize the expected "top" IP
+			d.nextTopIP(rm.weights.rn) // initialize the expected "top" IP
 		}
 
 		for j, query := range test.queries {
@@ -374,14 +371,6 @@ func TestLoadBalanceWRR(t *testing.T) {
 			if err != nil {
 				t.Errorf("Test %d: Expected no error, but got %s", i, err)
 				continue
-			}
-
-			if query.answerTopIP != "" {
-				checkTopIP(t, i, j, rec.Msg.Answer, query.answerTopIP)
-			}
-
-			if query.extraTopIP != "" {
-				checkTopIP(t, i, j, rec.Msg.Extra, query.extraTopIP)
 			}
 
 			cname, address, mx, sorted := countRecords(rec.Msg.Answer)
@@ -414,25 +403,4 @@ func TestLoadBalanceWRR(t *testing.T) {
 			}
 		}
 	}
-}
-
-func checkTopIP(t *testing.T, i, j int, result []dns.RR, expectedTopIP string) {
-	expected := net.ParseIP(expectedTopIP)
-	for _, r := range result {
-		switch r.Header().Rrtype {
-		case dns.TypeA:
-			ar := r.(*dns.A)
-			if !ar.A.Equal(expected) {
-				t.Errorf("Test %d query %d: expected top IP %s but got %s", i, j, expectedTopIP, ar.A)
-			}
-			return
-		case dns.TypeAAAA:
-			ar := r.(*dns.AAAA)
-			if !ar.AAAA.Equal(expected) {
-				t.Errorf("Test %d query %d: expected top IP %s but got %s", i, j, expectedTopIP, ar.AAAA)
-			}
-			return
-		}
-	}
-	t.Errorf("Test %d query %d: expected top IP %s but got no address records", i, j, expectedTopIP)
 }

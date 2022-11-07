@@ -26,9 +26,7 @@ func setup(c *caddy.Controller) error {
 
 	if policy == weightedRoundRobinPolicy {
 
-		if weighted.isRandom {
-			weighted.rn = rand.New(rand.NewSource(time.Now().UnixNano()))
-		}
+		weighted.rn = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 		stopReloadChan := make(chan bool)
 		weighted.periodicWeightUpdate(stopReloadChan)
@@ -81,8 +79,7 @@ func parse(c *caddy.Controller) (string, *weightedRR, error) {
 			}
 
 			w := &weightedRR{
-				reload:   30 * time.Second,
-				isRandom: true,
+				reload: 30 * time.Second,
 			}
 
 			fileName := args[1]
@@ -106,12 +103,6 @@ func parse(c *caddy.Controller) (string, *weightedRR, error) {
 						return "", nil, c.Errf("invalid reload duration '%s'", t[0])
 					}
 					w.reload = d
-				case "deterministic":
-					t := c.RemainingArgs()
-					if len(t) > 0 {
-						return "", nil, c.Errf("unknown property '%s'", c.Val())
-					}
-					w.isRandom = false
 				default:
 					return "", nil, c.Errf("unknown property '%s'", c.Val())
 				}
