@@ -53,9 +53,7 @@ ip22 weight22
 
 where *ipXY* is an IP address for *domain-nameX* and *weightXY* is the weight value associated with that IP. The weight values are in the range of [1,255].
 
-For each new result list, the weighted-round-robin policy determines the "next expected top IP" from the weighted IPs list (defined in the weight file). Afterwards, it tries to move that particular IP to the first (top) position of the result list.
-
-If the server receives a query for which no domain name is specified in the corresponding weight file then the answer is returned unmodified. If the domain name is specified in the weight file but the answer does not include the expected top IP (or there isn't any IP/weight pair specified for the particular domain name) then the answer is returned unmodified, too.
+The weighted-round-robin policy selects one of the address record in the result list and moves it to the top (first) position in the list. The random selection takes into account the weight values assigned to the addresses in the weight file. If an address in the result list is associated with no weight value in the weight file then the default weight value "1" is assumed for it when the selection is performed.
 
 More (optional) control for the "weighted_round_robin" policy:
 

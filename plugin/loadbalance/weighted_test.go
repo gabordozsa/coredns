@@ -3,7 +3,6 @@ package loadbalance
 import (
 	"context"
 	"errors"
-	"math/rand"
 	"net"
 	"strings"
 	"testing"
@@ -20,13 +19,10 @@ w1,example.org
 192.168.1.14 20
 `
 
-var testOneDomainWRR = map[string]*domain{
-	"w1,example.org.": &domain{
-		weights: []*weightItem{
-			&weightItem{net.ParseIP("192.168.1.14"), uint8(20)},
-			&weightItem{net.ParseIP("192.168.1.15"), uint8(10)},
-		},
-		wsum: uint(30),
+var testOneDomainWRR = map[string]weights{
+	"w1,example.org.": weights{
+		&weightItem{net.ParseIP("192.168.1.15"), uint8(10)},
+		&weightItem{net.ParseIP("192.168.1.14"), uint8(20)},
 	},
 }
 
@@ -36,28 +32,25 @@ w1.example.org
 192.168.1.15   10
 192.168.1.14   20
 
- # domain 2
- w2.example.org
+# domain 2
+w2.example.org
+ # domain 3
+ w3.example.org
  192.168.2.16 11
  192.168.2.15 12
  192.168.2.14 13
 `
 
-var testTwoDomainsWRR = map[string]*domain{
-	"w1.example.org.": &domain{
-		weights: []*weightItem{
-			&weightItem{net.ParseIP("192.168.1.14"), uint8(20)},
-			&weightItem{net.ParseIP("192.168.1.15"), uint8(10)},
-		},
-		wsum: uint(30),
+var testTwoDomainsWRR = map[string]weights{
+	"w1.example.org.": weights{
+		&weightItem{net.ParseIP("192.168.1.15"), uint8(10)},
+		&weightItem{net.ParseIP("192.168.1.14"), uint8(20)},
 	},
-	"w2.example.org.": &domain{
-		weights: []*weightItem{
-			&weightItem{net.ParseIP("192.168.2.14"), uint8(13)},
-			&weightItem{net.ParseIP("192.168.2.15"), uint8(12)},
-			&weightItem{net.ParseIP("192.168.2.16"), uint8(11)},
-		},
-		wsum: uint(36),
+	"w2.example.org.": weights{},
+	"w3.example.org.": weights{
+		&weightItem{net.ParseIP("192.168.2.16"), uint8(11)},
+		&weightItem{net.ParseIP("192.168.2.15"), uint8(12)},
+		&weightItem{net.ParseIP("192.168.2.14"), uint8(13)},
 	},
 }
 
@@ -89,7 +82,7 @@ func TestWeightFileUpdate(t *testing.T) {
 	tests := []struct {
 		weightFilContent   string
 		shouldErr          bool
-		expectedDomains    map[string]*domain
+		expectedDomains    map[string]weights
 		expectedErrContent string // substring from the expected error. Empty for positive cases.
 	}{
 		// positive
@@ -109,7 +102,7 @@ func TestWeightFileUpdate(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer rm()
-		weighted := &weightedRR{fileName: testFile, rn: rand.New(rand.NewSource(1))}
+		weighted := &weightedRR{fileName: testFile}
 		err = weighted.updateWeights()
 		if test.shouldErr && err == nil {
 			t.Errorf("Test %d: Expected error but found %s", i, err)
@@ -135,34 +128,26 @@ func TestWeightFileUpdate(t *testing.T) {
 	}
 }
 
-func checkDomainsWRR(t *testing.T, testIndex int, expectedDomains, domains map[string]*domain) error {
+func checkDomainsWRR(t *testing.T, testIndex int, expectedDomains, domains map[string]weights) error {
 	var ret error
 	retError := errors.New("Check domains failed")
-	for dname, expectedDomain := range expectedDomains {
-		domain, ok := domains[dname]
+	for dname, expectedWeights := range expectedDomains {
+		ws, ok := domains[dname]
 		if !ok {
 			t.Errorf("Test %d: Expected domain %s but not found it", testIndex, dname)
 			ret = retError
 		} else {
-			expectedWeights := expectedDomain.weights
-			weights := domain.weights
-			if len(expectedWeights) != len(weights) {
+			if len(expectedWeights) != len(ws) {
 				t.Errorf("Test %d: Expected len(weights): %d for domain %s but got %d",
-					testIndex, len(expectedWeights), dname, len(weights))
+					testIndex, len(expectedWeights), dname, len(ws))
 				ret = retError
 			} else {
 				for i, w := range expectedWeights {
-					if !w.address.Equal(weights[i].address) || w.value != weights[i].value {
+					if !w.address.Equal(ws[i].address) || w.value != ws[i].value {
 						t.Errorf("Test %d: Weight list differs at index %d for domain %s. "+
-							"Expected: %v got: %v", testIndex, i, dname, expectedWeights[i], weights[i])
+							"Expected: %v got: %v", testIndex, i, dname, expectedWeights[i], ws[i])
 						ret = retError
 					}
-				}
-				expectedWsum := expectedDomain.wsum
-				if expectedWsum != domain.wsum {
-					t.Errorf("Test %d: Expected weight sum %d but got %d for domain %s", testIndex,
-						expectedWsum, domain.wsum, dname)
-					ret = retError
 				}
 			}
 		}
@@ -184,7 +169,7 @@ func TestPeriodicWeightUpdate(t *testing.T) {
 	defer rm()
 
 	// configure weightedRR with "oneDomainWRR" weight file content
-	weighted := &weightedRR{fileName: testFile1, rn: rand.New(rand.NewSource(1))}
+	weighted := &weightedRR{fileName: testFile1}
 
 	err = weighted.updateWeights()
 	if err != nil {
@@ -214,41 +199,47 @@ func TestPeriodicWeightUpdate(t *testing.T) {
 	}
 }
 
+// Fake random number generator for testing
+type fakeRandomGen struct {
+	expectedLimit uint
+	testIndex     int
+	queryIndex    int
+	randv         uint
+	t             *testing.T
+}
+
+func (r *fakeRandomGen) randInit() {
+}
+
+func (r *fakeRandomGen) randUint(limit uint) uint {
+	if limit != r.expectedLimit {
+		r.t.Errorf("Test %d query %d: Expected weights sum %d but got %d",
+			r.testIndex, r.queryIndex, r.expectedLimit, limit)
+	}
+	return r.randv
+}
+
 func TestLoadBalanceWRR(t *testing.T) {
-	weighted := &weightedRR{rn: rand.New(rand.NewSource(1))}
-
-	rm := RoundRobin{Next: handler(), policy: weightedRoundRobinPolicy, weights: weighted}
-
 	type testQuery struct {
-		name        string // domain name to query
-		answerTopIP string // top (first) address record in the answer. Empty if no change is expected.
-		extraTopIP  string // top (first) address record in the extra section. Empty if no change is expected.
+		randv uint   // fake random value for selecting the top IP
+		topIP string // top (first) address record in the answer
 	}
 
 	// domain maps to test
-	oneDomain := map[string]*domain{
-		"endpoint.region2.skydns.test": &domain{
-			weights: []*weightItem{
-				&weightItem{net.ParseIP("10.240.0.2"), uint8(2)},
-				&weightItem{net.ParseIP("10.240.0.1"), uint8(1)},
-			},
-			wsum: uint(3),
+	oneDomain := map[string]weights{
+		"endpoint.region2.skydns.test.": weights{
+			&weightItem{net.ParseIP("10.240.0.2"), uint8(3)},
+			&weightItem{net.ParseIP("10.240.0.1"), uint8(2)},
 		},
 	}
-	twoDomains := map[string]*domain{
-		"endpoint.region2.skydns.test": &domain{
-			weights: []*weightItem{
-				&weightItem{net.ParseIP("10.240.0.2"), uint8(2)},
-				&weightItem{net.ParseIP("10.240.0.1"), uint8(1)},
-			},
-			wsum: uint(3),
+	twoDomains := map[string]weights{
+		"endpoint.region2.skydns.test.": weights{
+			&weightItem{net.ParseIP("10.240.0.2"), uint8(5)},
+			&weightItem{net.ParseIP("10.240.0.1"), uint8(2)},
 		},
-		"endpoint.region1.skydns.test": &domain{
-			weights: []*weightItem{
-				&weightItem{net.ParseIP("::2"), uint8(3)},
-				&weightItem{net.ParseIP("::1"), uint8(2)},
-			},
-			wsum: uint(5),
+		"endpoint.region1.skydns.test.": weights{
+			&weightItem{net.ParseIP("::2"), uint8(4)},
+			&weightItem{net.ParseIP("::1"), uint8(3)},
 		},
 	}
 
@@ -262,7 +253,8 @@ func TestLoadBalanceWRR(t *testing.T) {
 		addressExtra  int
 		mxAnswer      int
 		mxExtra       int
-		domains       map[string]*domain
+		domains       map[string]weights
+		sumWeights    uint // sum of weights in the answer
 		queries       []testQuery
 	}{
 		{
@@ -280,92 +272,91 @@ func TestLoadBalanceWRR(t *testing.T) {
 				testutil.MX("mx.region2.skydns.test.			300	IN	MX		2	mx2.region2.skydns.test."),
 				testutil.MX("mx.region2.skydns.test.			300	IN	MX		3	mx3.region2.skydns.test."),
 			},
+			extra: []dns.RR{
+				testutil.CNAME("cname6.region2.skydns.test.	300	IN	CNAME		endpoint.region2.skydns.test."),
+				testutil.A("endpoint.region2.skydns.test.		300	IN	A			10.240.0.1"),
+				testutil.A("endpoint.region2.skydns.test.	    300	IN	A			10.240.0.2"),
+				testutil.A("endpoint.region2.skydns.test.	    300	IN	A			10.240.0.3"),
+				testutil.AAAA("endpoint.region1.skydns.test.	300	IN	AAAA		::1"),
+				testutil.AAAA("endpoint.region1.skydns.test.	300	IN	AAAA		::2"),
+				testutil.MX("mx.region2.skydns.test.			300	IN	MX		1	mx1.region2.skydns.test."),
+			},
 			cnameAnswer:   4,
+			cnameExtra:    1,
 			addressAnswer: 5,
+			addressExtra:  5,
 			mxAnswer:      3,
+			mxExtra:       1,
 			domains:       twoDomains,
+			sumWeights:    15,
 			queries: []testQuery{
-				{"endpoint.region2.skydns.test", "10.240.0.2", ""}, // domain 1 weight 2 - first time
-				{"w1.region3.skydns.test", "", ""},                 // domain is not in the weight file -> no change
-				{"endpoint.region2.skydns.test", "10.240.0.2", ""}, // domain 1 weight 2 -  second time
-				{"endpoint.region1.skydns.test", "::2", ""},        // domain 2 weight 3 - first time
-				{"endpoint.region2.skydns.test", "10.240.0.1", ""}, // domain 1 weight 1 - first time
-				{"endpoint.region1.skydns.test", "::2", ""},        // domain 2 weight 3 - second time
-				{"endpoint.region2.skydns.test", "10.240.0.2", ""}, // weight 2 - first time
-				{"endpoint.region1.skydns.test", "::2", ""},        // domain 2 weight 3 - third time
-				{"endpoint.region2.skydns.test", "10.240.0.2", ""}, // weight 2 - second time
-				{"endpoint.region1.skydns.test", "::1", ""},        // domain 2 weight 2 - first time
+				{0, "10.240.0.2"},  // domain 1 weight 5
+				{4, "10.240.0.2"},  // domain 1 weight 5
+				{5, "::2"},         // domain 2 weight 4
+				{8, "::2"},         // domain 2 weight 4
+				{9, "::1"},         // domain 2 weight 3
+				{11, "::1"},        // domain 2 weight 3
+				{12, "10.240.0.1"}, // domain 1 weight 2
+				{13, "10.240.0.1"}, // domain 1 weight 2
+				{14, "10.240.0.3"}, // domain 1 no weight -> default weight
 			},
 		},
 		{
 			answer: []dns.RR{
-				testutil.A("endpoint.region2.skydns.test.		300	IN	A			10.240.0.3"),
+				testutil.A("endpoint.region2.skydns.test.		300	IN	A			10.240.0.1"),
+				testutil.MX("mx.region2.skydns.test.			300	IN	MX		1	mx1.region2.skydns.test."),
+				testutil.CNAME("cname.region2.skydns.test.	300	IN	CNAME		endpoint.region2.skydns.test."),
+				testutil.A("endpoint.region2.skydns.test.		300	IN	A			10.240.0.2"),
+				testutil.A("endpoint.region1.skydns.test.		300	IN	A			10.240.0.3"),
+			},
+			cnameAnswer:   1,
+			addressAnswer: 3,
+			mxAnswer:      1,
+			domains:       oneDomain,
+			sumWeights:    6,
+			queries: []testQuery{
+				{0, "10.240.0.2"}, // weight 3
+				{2, "10.240.0.2"}, // weight 3
+				{3, "10.240.0.1"}, // weight 2
+				{4, "10.240.0.1"}, // weight 2
+				{5, "10.240.0.3"}, // no domain -> default weight
+			},
+		},
+		{
+			answer: []dns.RR{
 				testutil.MX("mx.region2.skydns.test.			300	IN	MX		1	mx1.region2.skydns.test."),
 				testutil.CNAME("cname.region2.skydns.test.	300	IN	CNAME		endpoint.region2.skydns.test."),
 			},
-			cnameAnswer:   1,
-			addressAnswer: 1,
-			mxAnswer:      1,
-			domains:       oneDomain,
+			cnameAnswer: 1,
+			mxAnswer:    1,
+			domains:     oneDomain,
 			queries: []testQuery{
-				{"endpoint.region2.skydns.test", "", ""}, // no domains - empty weight file -> no change
-				{"endpoint.region2.skydns.test", "", ""}, // IP is not in the address list -> no change
-				{"w1.region1.skydns.test", "", ""},       // domain is not in the weight file -> no change
-			},
-		},
-		{
-			answer: []dns.RR{
-				testutil.MX("mx.region2.skydns.test.			300	IN	MX		1	mx1.region2.skydns.test."),
-				testutil.A("endpoint.region2.skydns.test.		300	IN	A			10.240.0.1"),
-				testutil.A("endpoint.region2.skydns.test.		300	IN	A			10.240.0.2"),
-				testutil.MX("mx.region2.skydns.test.			300	IN	MX		1	mx2.region2.skydns.test."),
-				testutil.CNAME("cname2.region2.skydns.test.	300	IN	CNAME		cname3.region2.skydns.test."),
-				testutil.A("endpoint.region2.skydns.test.		300	IN	A			10.240.0.3"),
-				testutil.MX("mx.region2.skydns.test.			300	IN	MX		1	mx3.region2.skydns.test."),
-			},
-			extra: []dns.RR{
-				testutil.AAAA("endpoint.region2.skydns.test.	300	IN	AAAA		::1"),
-				testutil.MX("mx.region2.skydns.test.			300	IN	MX		1	mx1.region2.skydns.test."),
-				testutil.CNAME("cname2.region2.skydns.test.	300	IN	CNAME		cname3.region2.skydns.test."),
-				testutil.MX("mx.region2.skydns.test.			300	IN	MX		1	mx2.region2.skydns.test."),
-				testutil.AAAA("endpoint.region2.skydns.test.	300	IN	AAAA		::2"),
-				testutil.MX("mx.region2.skydns.test.			300	IN	MX		1	mx3.region2.skydns.test."),
-			},
-			cnameAnswer:   1,
-			cnameExtra:    1,
-			addressAnswer: 3,
-			addressExtra:  2,
-			mxAnswer:      3,
-			mxExtra:       3,
-			domains:       twoDomains,
-			queries: []testQuery{
-				{"endpoint.region2.skydns.test", "10.240.0.2", ""}, // domain 1 weight 2 - first time
-				{"w1.region1.skydns.test", "", ""},                 // domain is not in the weight file -> no change
-				{"endpoint.region1.skydns.test", "", "::2"},        // domain 2 weight 3 -  first time
-				{"endpoint.region2.skydns.test", "10.240.0.2", ""}, // domain 1 weight 2 -  second time
-				{"endpoint.region1.skydns.test", "", "::2"},        // domain 2 weight 3 -  second time
-				{"endpoint.region2.skydns.test", "10.240.0.1", ""}, // domain 1 weight 1 - first time
-				{"endpoint.region1.skydns.test", "", "::2"},        // domain 2 weight 3 -  third time
-				{"endpoint.region2.skydns.test", "10.240.0.2", ""}, // weight 2 - first time
-				{"endpoint.region1.skydns.test", "", "::1"},        // domain 2 weight 2 - first time
+				{0, ""}, // no address records -> answer unaltered
 			},
 		},
 	}
+
+	testRand := &fakeRandomGen{t: t}
+	weighted := &weightedRR{randomGen: testRand}
+	rm := RoundRobin{Next: handler(), policy: weightedRoundRobinPolicy, weights: weighted}
 
 	rec := dnstest.NewRecorder(&testutil.ResponseWriter{})
 
 	for i, test := range tests {
 		// set domain map for weighted round robin
 		rm.weights.domains = test.domains
-		for _, d := range rm.weights.domains {
-			d.nextTopIP(rm.weights.rn) // initialize the expected "top" IP
-		}
+		testRand.testIndex = i
+		testRand.expectedLimit = test.sumWeights
 
 		for j, query := range test.queries {
 			req := new(dns.Msg)
-			req.SetQuestion(query.name, dns.TypeSRV)
+			req.SetQuestion("endpoint.region2.skydns.test", dns.TypeSRV)
 			req.Answer = test.answer
 			req.Extra = test.extra
+
+			// Set fake random number
+			testRand.randv = query.randv
+			testRand.queryIndex = j
 
 			_, err := rm.ServeDNS(context.TODO(), rec, req)
 			if err != nil {
@@ -373,8 +364,11 @@ func TestLoadBalanceWRR(t *testing.T) {
 				continue
 			}
 
+			checkTopIP(t, i, j, rec.Msg.Answer, query.topIP)
+			checkTopIP(t, i, j, rec.Msg.Extra, query.topIP)
+
 			cname, address, mx, sorted := countRecords(rec.Msg.Answer)
-			if query.answerTopIP != "" && !sorted {
+			if query.topIP != "" && !sorted {
 				t.Errorf("Test %d query %d: Expected CNAMEs, then AAAAs, then MX in Answer, but got mixed", i, j)
 			}
 			if cname != test.cnameAnswer {
@@ -388,7 +382,7 @@ func TestLoadBalanceWRR(t *testing.T) {
 			}
 
 			cname, address, mx, sorted = countRecords(rec.Msg.Extra)
-			if query.extraTopIP != "" && !sorted {
+			if query.topIP != "" && !sorted {
 				t.Errorf("Test %d query %d: Expected CNAMEs, then AAAAs, then MX in Answer, but got mixed", i, j)
 			}
 
@@ -401,6 +395,26 @@ func TestLoadBalanceWRR(t *testing.T) {
 			if mx != test.mxExtra {
 				t.Errorf("Test %d query %d: Expected %d MXs in Extra, but got %d", i, j, test.mxAnswer, mx)
 			}
+		}
+	}
+}
+
+func checkTopIP(t *testing.T, i, j int, result []dns.RR, expectedTopIP string) {
+	expected := net.ParseIP(expectedTopIP)
+	for _, r := range result {
+		switch r.Header().Rrtype {
+		case dns.TypeA:
+			ar := r.(*dns.A)
+			if !ar.A.Equal(expected) {
+				t.Errorf("Test %d query %d: expected top IP %s but got %s", i, j, expectedTopIP, ar.A)
+			}
+			return
+		case dns.TypeAAAA:
+			ar := r.(*dns.AAAA)
+			if !ar.AAAA.Equal(expected) {
+				t.Errorf("Test %d query %d: expected top IP %s but got %s", i, j, expectedTopIP, ar.AAAA)
+			}
+			return
 		}
 	}
 }

@@ -35,8 +35,8 @@ func (r *RoundRobinResponseWriter) WriteMsg(res *dns.Msg) error {
 	case weightedRoundRobinPolicy:
 		switch res.Question[0].Qtype {
 		case dns.TypeA, dns.TypeAAAA, dns.TypeSRV:
-			res.Answer = r.weights.weightedRoundRobin(res.Question[0].Name, res.Answer)
-			res.Extra = r.weights.weightedRoundRobin(res.Question[0].Name, res.Extra)
+			res.Answer = r.weights.weightedRoundRobin(res.Answer)
+			res.Extra = r.weights.weightedRoundRobin(res.Extra)
 		default:
 			return r.ResponseWriter.WriteMsg(res)
 		}

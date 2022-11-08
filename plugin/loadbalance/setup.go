@@ -3,7 +3,6 @@ package loadbalance
 import (
 	"errors"
 	"fmt"
-	"math/rand"
 	"path/filepath"
 	"time"
 
@@ -26,7 +25,7 @@ func setup(c *caddy.Controller) error {
 
 	if policy == weightedRoundRobinPolicy {
 
-		weighted.rn = rand.New(rand.NewSource(time.Now().UnixNano()))
+		weighted.randInit()
 
 		stopReloadChan := make(chan bool)
 		weighted.periodicWeightUpdate(stopReloadChan)
@@ -79,7 +78,8 @@ func parse(c *caddy.Controller) (string, *weightedRR, error) {
 			}
 
 			w := &weightedRR{
-				reload: 30 * time.Second,
+				reload:    30 * time.Second,
+				randomGen: &randomUint{},
 			}
 
 			fileName := args[1]

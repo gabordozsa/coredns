@@ -4,7 +4,6 @@ package loadbalance
 import (
 	"context"
 	"crypto/md5"
-	"math/rand"
 	"net"
 	"sync"
 	"time"
@@ -26,20 +25,21 @@ type (
 		fileName string
 		reload   time.Duration
 		md5sum   [md5.Size]byte
-		domains  map[string]*domain
-		rn       *rand.Rand
-		mutex    sync.Mutex
+		domains  map[string]weights
+		randomGen
+		mutex sync.Mutex
 	}
-	// Per domain weights and the expected top entry in the result list
-	domain struct {
-		weights []*weightItem
-		topIP   net.IP
-		wsum    uint
-	}
+	// Per domain weights
+	weights []*weightItem
 	// Weight assigned to an address
 	weightItem struct {
 		address net.IP
 		value   uint8
+	}
+	// Random uint generator
+	randomGen interface {
+		randInit()
+		randUint(limit uint) uint
 	}
 )
 

@@ -18,7 +18,21 @@ import (
 	"github.com/miekg/dns"
 )
 
-func (w *weightedRR) weightedRoundRobin(qname string, in []dns.RR) []dns.RR {
+// Random uint generator
+type randomUint struct {
+	rn *rand.Rand
+}
+
+func (r *randomUint) randInit() {
+	r.rn = rand.New(rand.NewSource(time.Now().UnixNano()))
+}
+
+func (r *randomUint) randUint(limit uint) uint {
+	return uint(r.rn.Intn(int(limit)))
+}
+
+// Apply weighted round robin policy to the answer
+func (w *weightedRR) weightedRoundRobin(in []dns.RR) []dns.RR {
 	cname := []dns.RR{}
 	address := []dns.RR{}
 	mx := []dns.RR{}
@@ -36,10 +50,12 @@ func (w *weightedRR) weightedRoundRobin(qname string, in []dns.RR) []dns.RR {
 		}
 	}
 
-	if len(address) == 0 || !w.setTopRecord(qname, address) {
+	if len(address) == 0 {
 		// no change
 		return in
 	}
+
+	w.setTopRecord(address)
 
 	out := append(cname, rest...)
 	out = append(out, address...)
@@ -48,64 +64,70 @@ func (w *weightedRR) weightedRoundRobin(qname string, in []dns.RR) []dns.RR {
 }
 
 // Move the next expected address to the first position in the result list
-func (w *weightedRR) setTopRecord(qname string, address []dns.RR) bool {
-	w.mutex.Lock()
-	defer w.mutex.Unlock()
-	curd, ok := w.domains[qname]
-	if !ok || len(curd.weights) == 0 {
-		// no weights list
-		return false
-	}
+func (w *weightedRR) setTopRecord(address []dns.RR) {
 
-	expTopIP := curd.topIP
-	itop := -1
+	itop := w.topAddressIndex(address)
 
-L:
-	for i, r := range address {
-		switch r.Header().Rrtype {
-		case dns.TypeA:
-			ar := r.(*dns.A)
-			if ar.A.Equal(expTopIP) {
-				itop = i
-				break L
-			}
-		case dns.TypeAAAA:
-			ar := r.(*dns.AAAA)
-			if ar.AAAA.Equal(expTopIP) {
-				itop = i
-				break L
-			}
-		}
-	}
-
-	if itop == -1 {
-		// Expected top entry is not in the list
-		return false
+	if itop < 0 {
+		// internal error
+		return
 	}
 
 	if itop != 0 {
-		// swap expected top entry with the actual one
+		// swap the selected top entry with the actual one
 		address[0], address[itop] = address[itop], address[0]
 	}
-	// move to the next expected "top" IP
-	curd.nextTopIP(w.rn)
-
-	return true
 }
 
-// Compute the next expected top (first) IP
-func (d *domain) nextTopIP(rn *rand.Rand) {
-	v := rn.Intn(int(d.wsum))
+// Compute the top (first) address index
+func (w *weightedRR) topAddressIndex(address []dns.RR) int {
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
 
-	psum := 0
-	var w *weightItem
-	for _, w = range d.weights {
-		psum += int(w.value)
+	// Dertermine the weight value for each address in the answer
+	var wsum uint
+	type waddress struct {
+		index  int
+		weight uint8
+	}
+	weightedAddr := make([]waddress, len(address))
+	for i, ar := range address {
+		wa := &weightedAddr[i]
+		wa.index = i
+		wa.weight = 1 // default weight
+		var ip net.IP
+		switch ar.Header().Rrtype {
+		case dns.TypeA:
+			ip = ar.(*dns.A).A
+		case dns.TypeAAAA:
+			ip = ar.(*dns.AAAA).AAAA
+		}
+		ws := w.domains[ar.Header().Name]
+		for _, w := range ws {
+			if w.address.Equal(ip) {
+				wa.weight = w.value
+				break
+			}
+		}
+		wsum += uint(wa.weight)
+	}
+
+	// Select the first (top) IP
+	sort.Slice(weightedAddr, func(i, j int) bool {
+		return weightedAddr[i].weight > weightedAddr[j].weight
+	})
+	v := w.randUint(wsum)
+	var psum uint
+	for _, wa := range weightedAddr {
+		psum += uint(wa.weight)
 		if v < psum {
-			break
+			return int(wa.index)
 		}
 	}
-	d.topIP = w.address
+
+	// we should never reach this
+	log.Errorf("Internal error: cannot find top addres (randv:%v wsum:%v)", v, wsum)
+	return -1
 }
 
 // Start go routine to update weights from the weight file periodically
@@ -133,36 +155,9 @@ func (w *weightedRR) periodicWeightUpdate(stopReload <-chan bool) {
 
 // Update weights from weight file
 func (w *weightedRR) updateWeights() error {
-	// access to weights must be protected
-	w.mutex.Lock()
-	defer w.mutex.Unlock()
-
-	isChanged, err := w.readWeightFile()
-	if err != nil || !isChanged {
-		return err
-	}
-
-	// Sort weight litst. First elements will have max weight.
-	for _, d := range w.domains {
-		sort.Slice(d.weights, func(i, j int) bool {
-			return d.weights[i].value > d.weights[j].value
-		})
-		// Calculate the sum of weights per domain
-		for _, w := range d.weights {
-			d.wsum += uint(w.value)
-		}
-		// initialize first expected "top" IP
-		d.nextTopIP(w.rn)
-	}
-	log.Infof("Successfully reloaded weight file %s", w.fileName)
-	return nil
-}
-
-// Read the weight file
-func (w *weightedRR) readWeightFile() (bool, error) {
 	reader, err := os.Open(filepath.Clean(w.fileName))
 	if err != nil {
-		return false, errOpen
+		return errOpen
 	}
 	defer reader.Close()
 
@@ -171,26 +166,37 @@ func (w *weightedRR) readWeightFile() (bool, error) {
 	tee := io.TeeReader(reader, &buf)
 	bytes, err := io.ReadAll(tee)
 	if err != nil {
-		return false, err
+		return err
 	}
 	md5sum := md5.Sum(bytes)
 	if md5sum == w.md5sum {
 		// file contents has not changed
-		return false, nil
+		return nil
 	}
 	w.md5sum = md5sum
 	scanner := bufio.NewScanner(&buf)
 
 	// Parse the weight file contents
-	return true, w.parseWeights(scanner)
+	err = w.parseWeights(scanner)
+	if err != nil {
+		return err
+	}
+
+	log.Infof("Successfully reloaded weight file %s", w.fileName)
+	return nil
 }
 
 // Parse the weight file contents
 func (w *weightedRR) parseWeights(scanner *bufio.Scanner) error {
-	// Reset domains
-	w.domains = make(map[string]*domain)
+	// access to weights must be protected
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
 
-	var curd *domain
+	// Reset domains
+	w.domains = make(map[string]weights)
+
+	var dname string
+	var ws weights
 	for scanner.Scan() {
 		nextLine := strings.TrimSpace(scanner.Text())
 		if len(nextLine) == 0 || nextLine[0:1] == "#" {
@@ -200,24 +206,22 @@ func (w *weightedRR) parseWeights(scanner *bufio.Scanner) error {
 		fields := strings.Fields(nextLine)
 		switch len(fields) {
 		case 1:
-			// (domain) name
-			dname := fields[0]
-
-			// sanity check
-			if net.ParseIP(dname) != nil {
+			// (domain) name sanity check
+			if net.ParseIP(fields[0]) != nil {
 				return fmt.Errorf("Wrong domain name:\"%s\" in weight file %s. (Maybe a missing weight value?)",
-					dname, w.fileName)
+					fields[0], w.fileName)
 			}
+			dname = fields[0]
 
 			// add the root domain if it is missing
 			if dname[len(dname)-1] != '.' {
 				dname += "."
 			}
 			var ok bool
-			curd, ok = w.domains[dname]
+			ws, ok = w.domains[dname]
 			if !ok {
-				curd = &domain{}
-				w.domains[dname] = curd
+				ws = make(weights, 0)
+				w.domains[dname] = ws
 			}
 		case 2:
 			// IP address and weight value
@@ -230,10 +234,11 @@ func (w *weightedRR) parseWeights(scanner *bufio.Scanner) error {
 				return fmt.Errorf("Wrong weight value:\"%s\" in weight file %s", fields[1], w.fileName)
 			}
 			witem := &weightItem{address: ip, value: uint8(weight)}
-			if curd == nil {
+			if dname == "" {
 				return fmt.Errorf("Missing domain name in weight file %s", w.fileName)
 			}
-			curd.weights = append(curd.weights, witem)
+			ws = append(ws, witem)
+			w.domains[dname] = ws
 		default:
 			return fmt.Errorf("Could not parse weight line:\"%s\" in weight file %s", nextLine, w.fileName)
 		}
@@ -248,10 +253,9 @@ func (w *weightedRR) parseWeights(scanner *bufio.Scanner) error {
 
 func (w *weightedRR) print() {
 	fmt.Printf("weightedRR --- fname:%s reload:%v ", w.fileName, w.reload)
-	for k, d := range w.domains {
-		fmt.Printf("domain:%s wsum:%v ", k, d.wsum)
-		fmt.Printf("weights:[")
-		for _, i := range d.weights {
+	for k, ws := range w.domains {
+		fmt.Printf("dname:%s weights:[", k)
+		for _, i := range ws {
 			fmt.Printf("%+v, ", *i)
 		}
 	}
