@@ -65,7 +65,6 @@ func (w *weightedRR) weightedRoundRobin(in []dns.RR) []dns.RR {
 
 // Move the next expected address to the first position in the result list
 func (w *weightedRR) setTopRecord(address []dns.RR) {
-
 	itop := w.topAddressIndex(address)
 
 	if itop < 0 {
@@ -132,7 +131,6 @@ func (w *weightedRR) topAddressIndex(address []dns.RR) int {
 
 // Start go routine to update weights from the weight file periodically
 func (w *weightedRR) periodicWeightUpdate(stopReload <-chan bool) {
-
 	if w.reload == 0 {
 		return
 	}
@@ -249,15 +247,4 @@ func (w *weightedRR) parseWeights(scanner *bufio.Scanner) error {
 	}
 
 	return nil
-}
-
-func (w *weightedRR) print() {
-	fmt.Printf("weightedRR --- fname:%s reload:%v ", w.fileName, w.reload)
-	for k, ws := range w.domains {
-		fmt.Printf("dname:%s weights:[", k)
-		for _, i := range ws {
-			fmt.Printf("%+v, ", *i)
-		}
-	}
-	fmt.Printf("]\n")
 }

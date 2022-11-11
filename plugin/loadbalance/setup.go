@@ -24,7 +24,6 @@ func setup(c *caddy.Controller) error {
 	}
 
 	if policy == weightedRoundRobinPolicy {
-
 		weighted.randInit()
 
 		stopReloadChan := make(chan bool)
@@ -54,7 +53,6 @@ func setup(c *caddy.Controller) error {
 }
 
 func parse(c *caddy.Controller) (string, *weightedRR, error) {
-
 	config := dnsserver.GetConfig(c)
 
 	for c.Next() {
