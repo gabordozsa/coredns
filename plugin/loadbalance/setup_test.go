@@ -28,25 +28,25 @@ func TestSetup(t *testing.T) {
 		// positive
 		{`loadbalance`, false, "round_robin", "", -1},
 		{`loadbalance round_robin`, false, "round_robin", "", -1},
-		{`loadbalance weighted_round_robin wfile`, false, "weighted_round_robin", "", 0},
-		{`loadbalance weighted_round_robin wf {
+		{`loadbalance weighted wfile`, false, "weighted", "", 0},
+		{`loadbalance weighted wf {
                                                 reload 10s
-                                              } `, false, "weighted_round_robin", "", 1},
-		{`loadbalance weighted_round_robin wf {
+                                              } `, false, "weighted", "", 1},
+		{`loadbalance weighted wf {
                                                 reload 0s
-                                              } `, false, "weighted_round_robin", "", 2},
+                                              } `, false, "weighted", "", 2},
 		// negative
 		{`loadbalance fleeb`, true, "", "unknown policy", -1},
 		{`loadbalance round_robin a`, true, "", "unknown property", -1},
-		{`loadbalance weighted_round_robin`, true, "", "missing weight file argument", -1},
-		{`loadbalance weighted_round_robin a b`, true, "", "unexpected argument", -1},
-		{`loadbalance weighted_round_robin wfile {
+		{`loadbalance weighted`, true, "", "missing weight file argument", -1},
+		{`loadbalance weighted a b`, true, "", "unexpected argument", -1},
+		{`loadbalance weighted wfile {
                                                    susu
                                                  } `, true, "", "unknown property", -1},
-		{`loadbalance weighted_round_robin wfile {
+		{`loadbalance weighted wfile {
                                                    reload a
                                                  } `, true, "", "invalid reload duration", -1},
-		{`loadbalance weighted_round_robin wfile {
+		{`loadbalance weighted wfile {
                                                     reload 30s  a
                                                  } `, true, "", "unexpected argument", -1},
 	}

@@ -7,7 +7,7 @@ import (
 
 const (
 	ramdomShufflePolicy      = "round_robin"
-	weightedRoundRobinPolicy = "weighted_round_robin"
+	weightedRoundRobinPolicy = "weighted"
 )
 
 // RoundRobinResponseWriter is a response writer that shuffles A, AAAA and MX records.
