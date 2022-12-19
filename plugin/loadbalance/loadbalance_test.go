@@ -12,7 +12,7 @@ import (
 )
 
 func TestLoadBalanceRandom(t *testing.T) {
-	rm := RoundRobin{Next: handler(), shuffle: randomShuffle}
+	rm := LoadBalance{Next: handler(), shuffle: randomShuffle}
 
 	// the first X records must be cnames after this test
 	tests := []struct {
@@ -124,7 +124,7 @@ func TestLoadBalanceRandom(t *testing.T) {
 }
 
 func TestLoadBalanceXFR(t *testing.T) {
-	rm := RoundRobin{Next: handler()}
+	rm := LoadBalance{Next: handler()}
 
 	answer := []dns.RR{
 		test.SOA("skydns.test.	30	IN	SOA	ns.dns.skydns.test. hostmaster.skydns.test. 1542756695 7200 1800 86400 30"),

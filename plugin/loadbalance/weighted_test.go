@@ -342,7 +342,7 @@ func TestLoadBalanceWRR(t *testing.T) {
 	shuffle := func(res *dns.Msg) *dns.Msg {
 		return weightedShuffle(res, weighted)
 	}
-	rm := RoundRobin{Next: handler(), shuffle: shuffle}
+	rm := LoadBalance{Next: handler(), shuffle: shuffle}
 
 	rec := dnstest.NewRecorder(&testutil.ResponseWriter{})
 

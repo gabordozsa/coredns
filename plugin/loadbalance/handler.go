@@ -10,16 +10,16 @@ import (
 )
 
 // RoundRobin is a plugin to rewrite responses for "load balancing".
-type RoundRobin struct {
+type LoadBalance struct {
 	Next    plugin.Handler
 	shuffle func(*dns.Msg) *dns.Msg
 }
 
 // ServeDNS implements the plugin.Handler interface.
-func (rr RoundRobin) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
-	rrw := &RoundRobinResponseWriter{ResponseWriter: w, shuffle: rr.shuffle}
+func (rr LoadBalance) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
+	rrw := &LoadBalanceResponseWriter{ResponseWriter: w, shuffle: rr.shuffle}
 	return plugin.NextOrFailure(rr.Name(), rr.Next, ctx, rrw, r)
 }
 
 // Name implements the Handler interface.
-func (rr RoundRobin) Name() string { return "loadbalance" }
+func (rr LoadBalance) Name() string { return "loadbalance" }

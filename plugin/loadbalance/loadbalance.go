@@ -10,14 +10,14 @@ const (
 	weightedRoundRobinPolicy = "weighted"
 )
 
-// RoundRobinResponseWriter is a response writer that shuffles A, AAAA and MX records.
-type RoundRobinResponseWriter struct {
+// LoadBalanceResponseWriter is a response writer that shuffles A, AAAA and MX records.
+type LoadBalanceResponseWriter struct {
 	dns.ResponseWriter
 	shuffle func(*dns.Msg) *dns.Msg
 }
 
 // WriteMsg implements the dns.ResponseWriter interface.
-func (r *RoundRobinResponseWriter) WriteMsg(res *dns.Msg) error {
+func (r *LoadBalanceResponseWriter) WriteMsg(res *dns.Msg) error {
 	if res.Rcode != dns.RcodeSuccess {
 		return r.ResponseWriter.WriteMsg(res)
 	}
@@ -83,9 +83,9 @@ func roundRobinShuffle(records []dns.RR) {
 }
 
 // Write implements the dns.ResponseWriter interface.
-func (r *RoundRobinResponseWriter) Write(buf []byte) (int, error) {
+func (r *LoadBalanceResponseWriter) Write(buf []byte) (int, error) {
 	// Should we pack and unpack here to fiddle with the packet... Not likely.
-	log.Warning("RoundRobin called with Write: not shuffling records")
+	log.Warning("LoadBalance called with Write: not shuffling records")
 	n, err := r.ResponseWriter.Write(buf)
 	return n, err
 }
