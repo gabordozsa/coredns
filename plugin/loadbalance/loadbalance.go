@@ -13,8 +13,7 @@ const (
 // RoundRobinResponseWriter is a response writer that shuffles A, AAAA and MX records.
 type RoundRobinResponseWriter struct {
 	dns.ResponseWriter
-	policy  string
-	weights *weightedRR
+	shuffle func(*dns.Msg) *dns.Msg
 }
 
 // WriteMsg implements the dns.ResponseWriter interface.
@@ -27,22 +26,14 @@ func (r *RoundRobinResponseWriter) WriteMsg(res *dns.Msg) error {
 		return r.ResponseWriter.WriteMsg(res)
 	}
 
-	switch r.policy {
-	case ramdomShufflePolicy:
-		res.Answer = roundRobin(res.Answer)
-		res.Ns = roundRobin(res.Ns)
-		res.Extra = roundRobin(res.Extra)
-	case weightedRoundRobinPolicy:
-		switch res.Question[0].Qtype {
-		case dns.TypeA, dns.TypeAAAA, dns.TypeSRV:
-			res.Answer = r.weights.weightedRoundRobin(res.Answer)
-			res.Extra = r.weights.weightedRoundRobin(res.Extra)
-		default:
-			return r.ResponseWriter.WriteMsg(res)
-		}
-	}
+	return r.ResponseWriter.WriteMsg(r.shuffle(res))
+}
 
-	return r.ResponseWriter.WriteMsg(res)
+func randomShuffle(res *dns.Msg) *dns.Msg {
+	res.Answer = roundRobin(res.Answer)
+	res.Ns = roundRobin(res.Ns)
+	res.Extra = roundRobin(res.Extra)
+	return res
 }
 
 func roundRobin(in []dns.RR) []dns.RR {

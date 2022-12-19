@@ -12,7 +12,7 @@ import (
 )
 
 func TestLoadBalanceRandom(t *testing.T) {
-	rm := RoundRobin{Next: handler(), policy: ramdomShufflePolicy}
+	rm := RoundRobin{Next: handler(), shuffle: randomShuffle}
 
 	// the first X records must be cnames after this test
 	tests := []struct {

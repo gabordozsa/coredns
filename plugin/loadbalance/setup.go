@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/miekg/dns"
+
 	"github.com/coredns/caddy"
 	"github.com/coredns/coredns/core/dnsserver"
 	"github.com/coredns/coredns/plugin"
@@ -17,98 +19,85 @@ var errOpen = errors.New("Weight file open error")
 
 func init() { plugin.Register("loadbalance", setup) }
 
+type lbFuncs struct {
+	shuffleFunc    func(*dns.Msg) *dns.Msg
+	onStartUpFunc  func() error
+	onShutdownFunc func() error
+	weighted       *weightedRR // used in unit tests only
+}
+
 func setup(c *caddy.Controller) error {
-	policy, weighted, err := parse(c)
+	//shuffleFunc, startUpFunc, shutdownFunc, err := parse(c)
+	lb, err := parse(c)
 	if err != nil {
 		return plugin.Error("loadbalance", err)
 	}
-
-	if policy == weightedRoundRobinPolicy {
-		weighted.randInit()
-
-		stopReloadChan := make(chan bool)
-		weighted.periodicWeightUpdate(stopReloadChan)
-
-		c.OnStartup(func() error {
-			err := weighted.updateWeights()
-			if errors.Is(err, errOpen) && weighted.reload != 0 {
-				log.Warningf("Failed to open weight file:%v. Will try again in %v",
-					err, weighted.reload)
-			} else if err != nil {
-				return plugin.Error("loadbalance", err)
-			}
-			return nil
-		})
-		c.OnShutdown(func() error {
-			close(stopReloadChan)
-			return nil
-		})
+	if lb.onStartUpFunc != nil {
+		c.OnStartup(lb.onStartUpFunc)
+	}
+	if lb.onShutdownFunc != nil {
+		c.OnShutdown(lb.onShutdownFunc)
 	}
 
 	dnsserver.GetConfig(c).AddPlugin(func(next plugin.Handler) plugin.Handler {
-		return RoundRobin{Next: next, policy: policy, weights: weighted}
+		return RoundRobin{Next: next, shuffle: lb.shuffleFunc}
 	})
 
 	return nil
 }
 
-func parse(c *caddy.Controller) (string, *weightedRR, error) {
+// func parse(c *caddy.Controller) (string, *weightedRR, error) {
+func parse(c *caddy.Controller) (*lbFuncs, error) {
 	config := dnsserver.GetConfig(c)
 
 	for c.Next() {
 		args := c.RemainingArgs()
 		if len(args) == 0 {
-			return ramdomShufflePolicy, nil, nil
+			return &lbFuncs{shuffleFunc: randomShuffle}, nil
 		}
 		switch args[0] {
 		case ramdomShufflePolicy:
 			if len(args) > 1 {
-				return "", nil, c.Errf("unknown property for %s", args[0])
+				return nil, c.Errf("unknown property for %s", args[0])
 			}
-			return ramdomShufflePolicy, nil, nil
+			return &lbFuncs{shuffleFunc: randomShuffle}, nil
 		case weightedRoundRobinPolicy:
 			if len(args) < 2 {
-				return "", nil, c.Err("missing weight file argument")
+				return nil, c.Err("missing weight file argument")
 			}
 
 			if len(args) > 2 {
-				return "", nil, c.Err("unexpected argument(s)")
+				return nil, c.Err("unexpected argument(s)")
 			}
 
-			w := &weightedRR{
-				reload:    30 * time.Second,
-				randomGen: &randomUint{},
+			weightFileName := args[1]
+			if !filepath.IsAbs(weightFileName) && config.Root != "" {
+				weightFileName = filepath.Join(config.Root, weightFileName)
 			}
-
-			fileName := args[1]
-			if !filepath.IsAbs(fileName) && config.Root != "" {
-				fileName = filepath.Join(config.Root, fileName)
-			}
-			w.fileName = fileName
-
+			reload := 30 * time.Second // default reload period
 			for c.NextBlock() {
 				switch c.Val() {
 				case "reload":
 					t := c.RemainingArgs()
 					if len(t) < 1 {
-						return "", nil, c.Err("reload duration value is missing")
+						return nil, c.Err("reload duration value is missing")
 					}
 					if len(t) > 1 {
-						return "", nil, c.Err("unexpected argument")
+						return nil, c.Err("unexpected argument")
 					}
-					d, err := time.ParseDuration(t[0])
+					var err error
+					reload, err = time.ParseDuration(t[0])
 					if err != nil {
-						return "", nil, c.Errf("invalid reload duration '%s'", t[0])
+						return nil, c.Errf("invalid reload duration '%s'", t[0])
 					}
-					w.reload = d
 				default:
-					return "", nil, c.Errf("unknown property '%s'", c.Val())
+					return nil, c.Errf("unknown property '%s'", c.Val())
 				}
 			}
-			return weightedRoundRobinPolicy, w, nil
+			return createWeightedFuncs(weightFileName, reload), nil
 		default:
-			return "", nil, fmt.Errorf("unknown policy: %s", args[0])
+			return nil, fmt.Errorf("unknown policy: %s", args[0])
 		}
 	}
-	return "", nil, c.ArgErr()
+	return nil, c.ArgErr()
 }

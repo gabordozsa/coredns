@@ -53,7 +53,7 @@ func TestSetup(t *testing.T) {
 
 	for i, test := range tests {
 		c := caddy.NewTestController("dns", test.input)
-		policy, w, err := parse(c)
+		lb, err := parse(c)
 
 		if test.shouldErr && err == nil {
 			t.Errorf("Test %d: Expected error but found %s for input %s", i, err, test.input)
@@ -61,31 +61,39 @@ func TestSetup(t *testing.T) {
 
 		if err != nil {
 			if !test.shouldErr {
-				t.Errorf("Test %d: Expected no error but found one for input %s. Error was: %v", i, test.input, err)
+				t.Errorf("Test %d: Expected no error but found one for input %s. Error was: %v",
+					i, test.input, err)
 			}
 
 			if !strings.Contains(err.Error(), test.expectedErrContent) {
-				t.Errorf("Test %d: Expected error to contain: %v, found error: %v, input: %s", i, test.expectedErrContent, err, test.input)
+				t.Errorf("Test %d: Expected error to contain: %v, found error: %v, input: %s",
+					i, test.expectedErrContent, err, test.input)
 			}
+			continue
+		}
+
+		if lb == nil {
+			t.Errorf("Test %d: Expected valid loadbalance funcs but got nil for input %s",
+				i, test.input)
+			continue
+		}
+		policy := ramdomShufflePolicy
+		if lb.weighted != nil {
+			policy = weightedRoundRobinPolicy
 		}
 		if policy != test.expectedPolicy {
-			t.Errorf("Test %d: Expected policy %s but got %s for input %s", i, test.expectedPolicy, policy, test.input)
-		}
-		if policy == weightedRoundRobinPolicy {
-			if err == nil && w == nil {
-				t.Errorf("Test %d: Expected valid weight struct but got nil for input %s", i, test.input)
-			}
-			if err != nil && w != nil {
-				t.Errorf("Test %d: Expected nil for weight struct due to error for input %s", i, test.input)
-			}
+			t.Errorf("Test %d: Expected policy %s but got %s for input %s", i,
+				test.expectedPolicy, policy, test.input)
 		}
 		if policy == weightedRoundRobinPolicy && test.weightedDataIndex >= 0 {
 			i := test.weightedDataIndex
-			if testWeighted[i].expectedWeightFile != w.fileName {
-				t.Errorf("Test %d: Expected weight file name %s but got %s for input %s", i, testWeighted[i].expectedWeightFile, w.fileName, test.input)
+			if testWeighted[i].expectedWeightFile != lb.weighted.fileName {
+				t.Errorf("Test %d: Expected weight file name %s but got %s for input %s",
+					i, testWeighted[i].expectedWeightFile, lb.weighted.fileName, test.input)
 			}
-			if testWeighted[i].expectedWeightReload != w.reload.String() {
-				t.Errorf("Test %d: Expected weight reload duration %s but got %s for input %s", i, testWeighted[i].expectedWeightReload, w.reload, test.input)
+			if testWeighted[i].expectedWeightReload != lb.weighted.reload.String() {
+				t.Errorf("Test %d: Expected weight reload duration %s but got %s for input %s",
+					i, testWeighted[i].expectedWeightReload, lb.weighted.reload, test.input)
 			}
 		}
 	}

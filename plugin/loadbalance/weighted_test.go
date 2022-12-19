@@ -339,13 +339,16 @@ func TestLoadBalanceWRR(t *testing.T) {
 
 	testRand := &fakeRandomGen{t: t}
 	weighted := &weightedRR{randomGen: testRand}
-	rm := RoundRobin{Next: handler(), policy: weightedRoundRobinPolicy, weights: weighted}
+	shuffle := func(res *dns.Msg) *dns.Msg {
+		return weightedShuffle(res, weighted)
+	}
+	rm := RoundRobin{Next: handler(), shuffle: shuffle}
 
 	rec := dnstest.NewRecorder(&testutil.ResponseWriter{})
 
 	for i, test := range tests {
 		// set domain map for weighted round robin
-		rm.weights.domains = test.domains
+		weighted.domains = test.domains
 		testRand.testIndex = i
 		testRand.expectedLimit = test.sumWeights
 

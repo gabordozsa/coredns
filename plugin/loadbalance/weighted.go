@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/md5"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -13,9 +14,36 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/miekg/dns"
+
+	"github.com/coredns/coredns/plugin"
+)
+
+type (
+	// "weighted-round-robin" policy specific data
+	weightedRR struct {
+		fileName string
+		reload   time.Duration
+		md5sum   [md5.Size]byte
+		domains  map[string]weights
+		randomGen
+		mutex sync.Mutex
+	}
+	// Per domain weights
+	weights []*weightItem
+	// Weight assigned to an address
+	weightItem struct {
+		address net.IP
+		value   uint8
+	}
+	// Random uint generator
+	randomGen interface {
+		randInit()
+		randUint(limit uint) uint
+	}
 )
 
 // Random uint generator
@@ -29,6 +57,57 @@ func (r *randomUint) randInit() {
 
 func (r *randomUint) randUint(limit uint) uint {
 	return uint(r.rn.Intn(int(limit)))
+}
+
+func weightedShuffle(res *dns.Msg, w *weightedRR) *dns.Msg {
+	switch res.Question[0].Qtype {
+	case dns.TypeA, dns.TypeAAAA, dns.TypeSRV:
+		res.Answer = w.weightedRoundRobin(res.Answer)
+		res.Extra = w.weightedRoundRobin(res.Extra)
+	}
+	return res
+}
+
+func weightedOnStartUp(w *weightedRR, stopReloadChan chan bool) error {
+	err := w.updateWeights()
+	if errors.Is(err, errOpen) && w.reload != 0 {
+		log.Warningf("Failed to open weight file:%v. Will try again in %v",
+			err, w.reload)
+	} else if err != nil {
+		return plugin.Error("loadbalance", err)
+	}
+	// start periodic weight file reload go routine
+	w.periodicWeightUpdate(stopReloadChan)
+	return nil
+}
+
+func createWeightedFuncs(weightFileName string,
+	reload time.Duration) *lbFuncs {
+	lb := &lbFuncs{
+		weighted: &weightedRR{
+			fileName:  weightFileName,
+			reload:    reload,
+			randomGen: &randomUint{},
+		},
+	}
+	lb.weighted.randomGen.randInit()
+
+	lb.shuffleFunc = func(res *dns.Msg) *dns.Msg {
+		return weightedShuffle(res, lb.weighted)
+	}
+
+	stopReloadChan := make(chan bool)
+
+	lb.onStartUpFunc = func() error {
+		return weightedOnStartUp(lb.weighted, stopReloadChan)
+	}
+
+	lb.onShutdownFunc = func() error {
+		// stop periodic weigh reload go routine
+		close(stopReloadChan)
+		return nil
+	}
+	return lb
 }
 
 // Apply weighted round robin policy to the answer
