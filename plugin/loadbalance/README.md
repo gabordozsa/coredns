@@ -30,6 +30,30 @@ returned in the answer.
 
  * **DURATION** interval to reload `WEIGHTFILE` and update weight assignments if there are changes in the file. The default value is `30s`. A value of `0s` means to not scan for changes and reload.
 
+
+## Weightfile
+
+The generic weight file syntax:
+
+~~~
+# Comment lines are ignored
+
+domain-name1
+ip11 weight11
+ip12 weight12
+ip13 weight13
+
+domain-name2
+ip21 weight21
+ip22 weight22
+# ... etc.
+~~~
+
+where `ipXY` is an IP address for `domain-nameX` and `weightXY` is the weight value associated with that IP. The weight values are in the range of [1,255].
+
+The `weighted` policy selects one of the address record in the result list and moves it to the top (first) position in the list. The random selection takes into account the weight values assigned to the addresses in the weight file. If an address in the result list is associated with no weight value in the weight file then the default weight value "1" is assumed for it when the selection is performed.
+
+
 ## Examples
 
 Load balance replies coming back from Google Public DNS:
@@ -64,22 +88,3 @@ www.example.com
 100.64.1.3 2
 ~~~
 
-The generic weight file syntax:
-
-~~~
-# Comment lines are ignored
-
-domain-name1
-ip11 weight11
-ip12 weight12
-ip13 weight13
-
-domain-name2
-ip21 weight21
-ip22 weight22
-# ... etc.
-~~~
-
-where `ipXY` is an IP address for `domain-nameX` and `weightXY` is the weight value associated with that IP. The weight values are in the range of [1,255].
-
-The `weighted` policy selects one of the address record in the result list and moves it to the top (first) position in the list. The random selection takes into account the weight values assigned to the addresses in the weight file. If an address in the result list is associated with no weight value in the weight file then the default weight value "1" is assumed for it when the selection is performed.
