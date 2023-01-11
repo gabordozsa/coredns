@@ -16,31 +16,19 @@ implementations (like glibc) are particular about that.
 ## Syntax
 
 ~~~
-loadbalance [POLICY]
-~~~
-
-* **POLICY** is how to balance. Available options are `round_robin` and `weighted`. The default is `round_robin`.
-
- The `round_robin` strategy randomizes the order of  A, AAAA, and MX records applying a uniform probability distribution.
-
- The `weighted` policy assigns weight values to IPs to control the relative likelihood of particular IPs to be returned as the first
-(top) A/AAAA record in the answer. Note that it does not shuffle all the records in the answer, it is only concerned about the first A/AAAA record
-returned in the answer.
-
-
-~~~
-loadbalance weighted WEIGHTFILE
-~~~
-
-* **WEIGHTFILE** is the file containing the weight values assigned to IPs for various domain names. If the path is relative, the path from the **root** plugin will be prepended to it. The format is explained below in the *Examples* section.
-
-~~~
-loadbalance weighted WEIGHTFILE {
+loadbalance [round_robin | weighted WEIGHTFILE] {
 			reload DURATION
 }
 ~~~
+* `round_robin` policy randomizes the order of  A, AAAA, and MX records applying a uniform probability distribution. This is the default load balancing policy.
 
-* **DURATION** interval to reload `WEIGHTFILE` and update weight assignments if there are changes in the file. The default value is `30s`. A value of `0s` means to not scan for changes and reload.
+* `weighted` policy assigns weight values to IPs to control the relative likelihood of particular IPs to be returned as the first
+(top) A/AAAA record in the answer. Note that it does not shuffle all the records in the answer, it is only concerned about the first A/AAAA record
+returned in the answer.
+
+ * **WEIGHTFILE** is the file containing the weight values assigned to IPs for various domain names. If the path is relative, the path from the **root** plugin will be prepended to it. The format is explained below in the *Examples* section.
+
+ * **DURATION** interval to reload `WEIGHTFILE` and update weight assignments if there are changes in the file. The default value is `30s`. A value of `0s` means to not scan for changes and reload.
 
 ## Examples
 
@@ -53,7 +41,8 @@ Load balance replies coming back from Google Public DNS:
 }
 ~~~
 
-Use weighted round robin strategy to load balance replies defined by the **file** plugin:
+Use the `weighted` strategy to load balance replies supplied by the **file** plugin. We assign weight vales `3`, `1` and `2` to the IPs `100.64.1.1`, `100.64.1.2` and `100.64.1.3`, respectively. These IPs are addresses in A records for the domain name `www.example.com` defined in the `./db.example.com` zone file. The ratio between the number of answers in which `100.64.1.1`, `100.64.1.2` or `100.64.1.3` is in the top (first) A record should converge to  `3 : 1 : 2`.  (E.g. there should be twice as many answers with `100.64.1.3` in the top A record than with `100.64.1.2`).
+Corefile:
 
 ~~~ corefile
 example.com {
@@ -66,7 +55,7 @@ example.com {
 }
 ~~~
 
-where the weight file `./db.example.com.weights` contains:
+weight file `./db.example.com.weights`:
 
 ~~~
 www.example.com
@@ -74,10 +63,6 @@ www.example.com
 100.64.1.2 1
 100.64.1.3 2
 ~~~
-
-This assigns weight vales `3`, `1` and `2` to the IPs `100.64.1.1`, `100.64.1.2` and `100.64.1.3`, respectively. These IPs are addresses in A records for the domain name `www.example.com`. (The IPs for the A records are defined in the `./db.example.com` file using the **file** plugin in this example).
-
-In this example, the ratio between the number of answers in which `100.64.1.1`, `100.64.1.2` or `100.64.1.3` is in the top (first) A record should converge to  `3 : 1 : 2`.  (E.g. there should be twice as many answers with `100.64.1.3` in the top A record than with `100.64.1.2`).
 
 The generic weight file syntax:
 
