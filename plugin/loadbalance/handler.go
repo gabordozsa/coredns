@@ -16,9 +16,9 @@ type LoadBalance struct {
 }
 
 // ServeDNS implements the plugin.Handler interface.
-func (rr LoadBalance) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
-	rrw := &LoadBalanceResponseWriter{ResponseWriter: w, shuffle: rr.shuffle}
-	return plugin.NextOrFailure(rr.Name(), rr.Next, ctx, rrw, r)
+func (lb LoadBalance) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
+	rw := &LoadBalanceResponseWriter{ResponseWriter: w, shuffle: lb.shuffle}
+	return plugin.NextOrFailure(lb.Name(), lb.Next, ctx, rw, r)
 }
 
 // Name implements the Handler interface.
