@@ -22,4 +22,4 @@ func (lb LoadBalance) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns
 }
 
 // Name implements the Handler interface.
-func (rr LoadBalance) Name() string { return "loadbalance" }
+func (lb LoadBalance) Name() string { return "loadbalance" }
