@@ -29,13 +29,13 @@ returned in the answer.
 
 
 ~~~
-loadbalance weighted_round_robin WEIGHTFILE
+loadbalance weighted WEIGHTFILE
 ~~~
 
 * **WEIGHTFILE** is the file containing the weight values assigned to IPs for various domain names. If the path is relative, the path from the **root** plugin will be prepended to it. The format is explained below in the *Examples* section.
 
 ~~~
-loadbalance weighted_round_robin WEIGHTFILE {
+loadbalance weighted WEIGHTFILE {
 			reload DURATION
 }
 ~~~
@@ -60,7 +60,7 @@ example.com {
         file ./db.example.com {
                 reload 10s
         }
-        loadbalance weighted_round_robin ./db.example.com.weights {
+        loadbalance weighted ./db.example.com.weights {
                     reload 10s
         }
 }
